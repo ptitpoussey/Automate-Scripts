@@ -89,6 +89,19 @@ function dnsappli(){
     nslookup
 }
 
+function replication(){
+    $domainname = (Get-WmiObject -Namespace root\cimv2 -Class Win32_ComputerSystem).domain
+    $domaincontroller = (Get-DnsServerSetting).computername
+    Install-WindowsFeature -Name DNS -IncludeManagementTools
+    Install-WindowsFeature AD-Domain-Services –IncludeManagementTools -Verbose
+
+
+    Install-ADDSDomainController -NoGlobalCatalog:$false -ReplicationSourceDC $domaincontroller -CreateDnsDelegation:$false `
+    -CriticalReplicationOnly:$false -DatabasePath "B:\BDD" -DomainName $domainname -InstallDns:$true `
+    -LogPath "L:\LOGS" -NoRebootOnCompletion:$false -SiteName "Default-First-Name" -SysvolPath "S:\SYSVOL" -Credential (Get-Credential $domainname"\Administrateur") `
+    -Force:$true
+} #pas finis 
+
 function domainjoin(){
     $domainname=Read-Host "Saisir le domaine à joindre: "
     $useradmin=Read-Host "Saisir le nom du compte admin du domain: "
@@ -177,7 +190,7 @@ function installadds() {
     $netbiosname = ($domaineNameVar).ToUpper()
     $domainenamecp = $domaineNameVar + "." + $extensionDomain
     Add-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools -includeAllSubFeature
-    Import-Module ADDSDeployement
+    Import-Module ADDSDeployment
     $ForestConfiguration = @{
         '-DatabasePath'         = 'B:\BDD';
         '-DomainMode'           = 'Default';
@@ -191,9 +204,32 @@ function installadds() {
         '-Force'                = $true;
         '-CreateDnsDelegation'  = $false 
     }
-    Install-ADDSforest @$ForestConfiguration   
+    Install-ADDSforest @ForestConfiguration   
 }
 
+
+function dhcp(){
+    Install-WindowsFeature DHCP -IncludeManagementTools
+    $startRange = Read-Host "Entrez l'adresse de début d'étendu: "
+    $endRange = Read-Host "Entrez l'adresse de fin d'étendu: "
+    $name = Read-Host "Entrez le nom de votre étendu: "
+    $network = Read-Host "Entrez l'adresse réseau"
+    $subnetMask = Read-Host "Entrez l'adresse de sous-réseau: "
+    $domainName  = (gwmi WIN32_ComputerSystem).Domain
+    $ipdhcp = (Get-NetIPAddress -AddressFamily IPv4 -InterfaceIndex $(Get-NetConnectionProfile | Select-Object -ExpandProperty InterfaceIndex) | Select-Object -ExpandProperty IPAddress)
+    $dnsnameddhcp = (Resolve-DnsName $ipdhcp).NameHost
+
+    Add-DHCPServerv4Scope -Name $name -StartRange $startRange -EndRange $endRange -SubnetMask $subnetMask -State Active
+    Set-DHCPServerv4Scope -ScopeId $network -LeaseDuration 1.00:00:00
+    Set-DHCPServerv4OptionValue $network -DnsDomain $domainName.ToUpper() -DnsServer $ipdhcp -Router "192.168.36.254"
+
+    Add-DhcpServerInDc -DnsName $dnsnameddhcp -IPAddress $ipdhcp
+    Set-ItemProperty –Path registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\ServerManager\Roles\12 –Name ConfigurationState –Value 2
+    
+    Get-DhcpServerv4Scope -ScopeID $network
+    Get-DhcpServerv4OptionValue -ScopeId $network
+    Get-DhcpServerv4OptionValue
+}
 
 function Startmenu(){
     Clear-Host
@@ -233,6 +269,8 @@ function menu() {
     Write-Host "7:Gérer les disques"
     Write-Host "8:Dns Config"
     Write-Host "9:Jonction du domaine"
+    Write-Host "10:Replication AD"
+    Write-Host "11:Configuration DHCP"
 
     Write-Host "Q:retour"
 
@@ -246,8 +284,10 @@ function menu() {
         5 { RemoveDisks;Pause;menu }
         6 { installadds;Pause;menu }
         7 { PartDisk;Pause;menu }
-        8 { domainjoin;Pause;menu }
-        9 { dnsappli;Pause;menu }
+        8 { dnsappli;Pause;menu }
+        9 { domainjoin;Pause;menu }
+        10 { replication;Pause;menu }
+        11 { dhcp;Pause;menu }
         Q { exit }
         default { menu }
     }
